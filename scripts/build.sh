@@ -76,8 +76,11 @@ build_platform() {
         -t "libnfs-${rid}" \
         "${PKG_DIR}"
 
-    # Extract binary from the scratch image
-    CONTAINER_ID=$(docker create "libnfs-${rid}")
+    # Extract binary from the scratch image. `docker create` rejects scratch
+    # images with no entrypoint, so pass `--entrypoint /bin/true` (the binary
+    # never actually runs — we just need a container to cp from).
+    CONTAINER_ID=$(docker create --entrypoint /bin/true "libnfs-${rid}" 2>/dev/null \
+                   || docker create "libnfs-${rid}" sh)
     docker cp "${CONTAINER_ID}:/${binary}" "${out_file}"
     docker rm "${CONTAINER_ID}" >/dev/null
 

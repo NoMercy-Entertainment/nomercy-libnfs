@@ -36,7 +36,35 @@ set(CMAKE_RC_COMPILER x86_64-w64-mingw32-windres)
 set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
 set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
+
+# windres only understands a small subset of options. By default CMake leaks
+# C compiler flags (-Wall, -Wextra) into the RC compiler invocation which
+# windres rejects with "invalid option -- 'W'". Override the RC compile
+# command to pass only the bits windres actually accepts.
+set(CMAKE_RC_FLAGS "")
+set(CMAKE_RC_COMPILE_OBJECT "<CMAKE_RC_COMPILER> -O coff -i <SOURCE> -o <OBJECT>")
 EOF
+
+# Disable libnfs's pthread paths globally for the Windows cross-compile.
+# MinGW's winpthreads makes libnfs's autoconf flag HAVE_PTHREAD even when
+# targeting Windows, which causes:
+#   - Header: both pthread and WIN32 typedef branches activate, typedef collisions
+#   - Source: #include <sys/syscall.h> (POSIX-only) inside the pthread branch
+# Rewriting the guard to a never-defined sentinel kills every pthread path
+# surgically; the WIN32 branch handles all threading for the Windows build.
+RUN find /build/libnfs -type f \( -name "*.h" -o -name "*.c" \) \
+        -exec sed -i 's/\bHAVE_PTHREAD\b/HAVE_PTHREAD_DISABLED_FOR_MINGW_BUILD/g' {} + \
+    && echo "Patched files mentioning HAVE_PTHREAD:" \
+    && grep -rln "HAVE_PTHREAD_DISABLED_FOR_MINGW_BUILD" /build/libnfs | head -20
+
+# Skip the version.rc resource step. CMake's RC compile invocation under
+# MinGW cross-compile leaks gcc-style warning flags (-Wall) to windres,
+# which rejects them. The .rc file is metadata-only; the DLL is functional
+# without it. The .def file (libnfs-win32.def) stays in SOURCES — it's
+# needed for the proper DLL export table.
+RUN sed -i '/configure_file.*version\.rc\.template/d' /build/libnfs/lib/CMakeLists.txt \
+    && sed -i 's|\${CMAKE_CURRENT_BINARY_DIR}/version\.rc ||g' /build/libnfs/lib/CMakeLists.txt \
+    && grep -A 2 -B 1 "version.rc\|win32.def" /build/libnfs/lib/CMakeLists.txt
 
 RUN echo "Building libnfs for win-x64 (MinGW)" \
     && cd /build/libnfs \
