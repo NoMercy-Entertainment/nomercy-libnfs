@@ -40,23 +40,23 @@ jobs:
           if-no-files-found: error
 
   # ---------------------------------------------------------------------------
-  # macOS builds — native, no docker. macOS runners are GitHub-hosted only.
-  # macos-14 = arm64 (Apple Silicon); macos-13 = x86_64 (Intel, last avail).
+  # macOS builds — native, no docker. Both arches build on Apple Silicon
+  # (macos-14) using CMAKE_OSX_ARCHITECTURES — macos-13 (Intel) was retired
+  # by GitHub on the free tier in late 2025. The arm64 host can produce
+  # x86_64 dylibs cross-arch; the toolchain ships both slices.
   # libnfs is POSIX-native — clean cmake build, no osxcross or patches needed.
   # ---------------------------------------------------------------------------
   macos-build:
     name: ${{ matrix.rid }}
+    runs-on: macos-14
     strategy:
       fail-fast: false
       matrix:
         include:
           - rid: osx-arm64
-            runs-on: macos-14
-            ext: dylib
+            arch: arm64
           - rid: osx-x64
-            runs-on: macos-13
-            ext: dylib
-    runs-on: ${{ matrix.runs-on }}
+            arch: x86_64
     env:
       LIBNFS_TAG: libnfs-6.0.2
       LIBNFS_SHA256: 4e5459cc3e0242447879004e9ad28286d4d27daa42cbdcde423248fad911e747
@@ -77,13 +77,15 @@ jobs:
           tar -xzf libnfs.tar.gz
           mv libnfs-${LIBNFS_TAG} libnfs
 
-      - name: Build libnfs
+      - name: Build libnfs (${{ matrix.arch }})
         run: |
           set -euo pipefail
           cd /tmp/libnfs-build/libnfs
           cmake -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX=/tmp/libnfs-build/install \
+            -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch }} \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
             -DBUILD_SHARED_LIBS=ON \
             -DENABLE_TESTS=OFF \
             -DENABLE_EXAMPLES=OFF \
@@ -112,9 +114,13 @@ jobs:
       - name: Verify symbols
         run: |
           set -euo pipefail
+          # Apple's `nm` flag set differs from BSD/GNU; -g lists external,
+          # -j prints just symbol names. The leading underscore is the
+          # Mach-O ABI for C symbols. We grep for the bare name.
+          SYMS=$(nm -gj output/${{ matrix.rid }}/libnfs.dylib)
           for sym in nfs_init_context nfs_destroy_context nfs_mount nfs_opendir mount_getexports mount_free_export_list nfs_set_version; do
-            nm -gU output/${{ matrix.rid }}/libnfs.dylib | grep -q " _${sym}$" \
-              || { echo "MISSING SYMBOL: ${sym}" >&2; exit 1; }
+            echo "$SYMS" | grep -qE "^_?${sym}$" \
+              || { echo "MISSING SYMBOL: ${sym}" >&2; echo "Available symbols:" >&2; echo "$SYMS" | head -30 >&2; exit 1; }
           done
           echo "All required exports present"
 
