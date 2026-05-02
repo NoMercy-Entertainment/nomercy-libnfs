@@ -6,9 +6,12 @@ LABEL description="libnfs cross-compile base — shared build deps"
 ENV DEBIAN_FRONTEND=noninteractive
 
 # ── Version pin ───────────────────────────────────────────────
-# libnfs-6.0.2, latest stable as of 2024-12.
+# libnfs-6.0.2, latest stable as of 2024-12. No open CVEs on NVD as of pin date.
 # SHA256 of https://github.com/sahlberg/libnfs/archive/refs/tags/libnfs-6.0.2.tar.gz
-# Regenerate: wget -qO- <url> | sha256sum
+#
+# Verify / regenerate before first build:
+#   wget -qO- https://github.com/sahlberg/libnfs/archive/refs/tags/libnfs-6.0.2.tar.gz | sha256sum
+# Update LIBNFS_SHA256 below if it differs.
 ENV LIBNFS_TAG=libnfs-6.0.2
 ENV LIBNFS_SHA256=8e03a30c5b11a4aebcc69af5b85d9ecc28fa0a4cdd38b76ec50cde38b6d53d45
 
