@@ -1,0 +1,176 @@
+name: Build libnfs binaries
+
+on:
+  push:
+    branches: [master, main]
+    paths:
+      - 'libnfs-*.dockerfile'
+      - 'scripts/**'
+      - '.github/workflows/build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Docker-based builds (Linux + Windows cross-compile)
+  # ---------------------------------------------------------------------------
+  docker-build:
+    name: ${{ matrix.rid }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rid: [win-x64, linux-x64, linux-arm64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build ${{ matrix.rid }}
+        run: bash scripts/build.sh ${{ matrix.rid }}
+
+      - name: Upload ${{ matrix.rid }} artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libnfs-${{ matrix.rid }}
+          path: output/${{ matrix.rid }}/
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # macOS builds — native, no docker. macOS runners are GitHub-hosted only.
+  # macos-14 = arm64 (Apple Silicon); macos-13 = x86_64 (Intel, last avail).
+  # libnfs is POSIX-native — clean cmake build, no osxcross or patches needed.
+  # ---------------------------------------------------------------------------
+  macos-build:
+    name: ${{ matrix.rid }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rid: osx-arm64
+            runs-on: macos-14
+            ext: dylib
+          - rid: osx-x64
+            runs-on: macos-13
+            ext: dylib
+    runs-on: ${{ matrix.runs-on }}
+    env:
+      LIBNFS_TAG: libnfs-6.0.2
+      LIBNFS_SHA256: 4e5459cc3e0242447879004e9ad28286d4d27daa42cbdcde423248fad911e747
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build deps
+        run: brew install cmake ninja
+
+      - name: Fetch + verify libnfs source
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/libnfs-build
+          cd /tmp/libnfs-build
+          curl -sSL -o libnfs.tar.gz \
+            "https://github.com/sahlberg/libnfs/archive/refs/tags/${LIBNFS_TAG}.tar.gz"
+          echo "${LIBNFS_SHA256}  libnfs.tar.gz" | shasum -a 256 -c -
+          tar -xzf libnfs.tar.gz
+          mv libnfs-${LIBNFS_TAG} libnfs
+
+      - name: Build libnfs
+        run: |
+          set -euo pipefail
+          cd /tmp/libnfs-build/libnfs
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/tmp/libnfs-build/install \
+            -DBUILD_SHARED_LIBS=ON \
+            -DENABLE_TESTS=OFF \
+            -DENABLE_EXAMPLES=OFF \
+            -DENABLE_UTILS=OFF \
+            -DENABLE_KERBEROS=OFF
+          cmake --build build --parallel
+          cmake --install build
+
+      - name: Stage dylib + fix install name
+        run: |
+          set -euo pipefail
+          mkdir -p output/${{ matrix.rid }}
+          DYLIB=$(find /tmp/libnfs-build/install/lib -name "libnfs*.dylib" -not -type l | head -1)
+          test -n "${DYLIB}" || { echo "no dylib produced" >&2; exit 1; }
+          cp "${DYLIB}" output/${{ matrix.rid }}/libnfs.dylib
+
+          # Set install_name to @rpath so .NET host can load from bin/runtimes/.../native
+          install_name_tool -id "@rpath/libnfs.dylib" output/${{ matrix.rid }}/libnfs.dylib
+
+          # Strip debug symbols
+          strip -x output/${{ matrix.rid }}/libnfs.dylib
+
+          ls -la output/${{ matrix.rid }}/
+          file output/${{ matrix.rid }}/libnfs.dylib
+
+      - name: Verify symbols
+        run: |
+          set -euo pipefail
+          for sym in nfs_init_context nfs_destroy_context nfs_mount nfs_opendir mount_getexports mount_free_export_list nfs_set_version; do
+            nm -gU output/${{ matrix.rid }}/libnfs.dylib | grep -q " _${sym}$" \
+              || { echo "MISSING SYMBOL: ${sym}" >&2; exit 1; }
+          done
+          echo "All required exports present"
+
+      - name: Upload ${{ matrix.rid }} artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libnfs-${{ matrix.rid }}
+          path: output/${{ matrix.rid }}/
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # Aggregate: pull all artifacts back into output/, regenerate checksums,
+  # commit + push back to the branch so consumers can pull binaries directly.
+  # ---------------------------------------------------------------------------
+  commit-binaries:
+    name: Commit binaries
+    needs: [docker-build, macos-build]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Stage into output/
+        run: |
+          set -euo pipefail
+          mkdir -p output/win-x64 output/linux-x64 output/linux-arm64 output/osx-x64 output/osx-arm64
+          for rid in win-x64 linux-x64 linux-arm64 osx-x64 osx-arm64; do
+            if [ -d "artifacts/libnfs-${rid}" ]; then
+              cp -v artifacts/libnfs-${rid}/* output/${rid}/
+            fi
+          done
+
+      - name: Regenerate CHECKSUMS.txt
+        run: |
+          set -euo pipefail
+          cd output
+          find . -type f -name "libnfs.*" | sort | xargs sha256sum > CHECKSUMS.txt
+          cat CHECKSUMS.txt
+
+      - name: Commit + push if changed
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add output/
+          if git diff --cached --quiet; then
+            echo "No binary changes — nothing to commit."
+          else
+            git commit -m "build(libnfs): refresh binaries from CI [skip ci]"
+            git push
+          fi
