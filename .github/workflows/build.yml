@@ -18,7 +18,7 @@ jobs:
   # ---------------------------------------------------------------------------
   docker-build:
     name: ${{ matrix.rid }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, beast-unit]
     strategy:
       fail-fast: false
       matrix:
@@ -41,14 +41,15 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # macOS builds — native, no docker. Both arches build on Apple Silicon
-  # (macos-14) using CMAKE_OSX_ARCHITECTURES — macos-13 (Intel) was retired
-  # by GitHub on the free tier in late 2025. The arm64 host can produce
-  # x86_64 dylibs cross-arch; the toolchain ships both slices.
+  # using CMAKE_OSX_ARCHITECTURES; the arm64 host produces x86_64 dylibs
+  # cross-arch, because the toolchain ships both slices. The mac mini is the
+  # only Apple machine in the fleet, and it is Apple Silicon like the
+  # GitHub-hosted image this replaced.
   # libnfs is POSIX-native — clean cmake build, no osxcross or patches needed.
   # ---------------------------------------------------------------------------
   macos-build:
     name: ${{ matrix.rid }}
-    runs-on: macos-14
+    runs-on: [self-hosted, macOS, ARM64, mac-mini]
     strategy:
       fail-fast: false
       matrix:
@@ -138,7 +139,7 @@ jobs:
   commit-binaries:
     name: Commit binaries
     needs: [docker-build, macos-build]
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, beast-unit]
     if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
