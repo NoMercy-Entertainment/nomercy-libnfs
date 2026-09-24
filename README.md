@@ -29,13 +29,13 @@ don't need Docker. SHA256 checksums are in `output/CHECKSUMS.txt`.
 
 ```bash
 # All platforms
-bash packages/nomercy-libnfs/scripts/build.sh
+bash server/network/nomercy-libnfs/scripts/build.sh
 
 # Single platform
-bash packages/nomercy-libnfs/scripts/build.sh win-x64
+bash server/network/nomercy-libnfs/scripts/build.sh win-x64
 
 # Verify checksums + symbols
-bash packages/nomercy-libnfs/scripts/verify.sh
+bash server/network/nomercy-libnfs/scripts/verify.sh
 ```
 
 macOS builds require a macOS SDK tarball (osxcross). Pass `--build-arg SDK_TARBALL_URL=<url>`

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # verify.sh — Verify libnfs binaries: checksums + basic symbol sanity.
 #
-# Usage: bash packages/nomercy-libnfs/scripts/verify.sh [platform]
+# Usage: bash server/network/nomercy-libnfs/scripts/verify.sh [platform]
 # Default: verify all platforms present in output/
 
 set -euo pipefail

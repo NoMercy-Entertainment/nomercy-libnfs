@@ -2,7 +2,7 @@
 # build.sh — Build libnfs for one or all platforms and extract the native binary.
 #
 # Usage:
-#   bash packages/nomercy-libnfs/scripts/build.sh [platform]
+#   bash server/network/nomercy-libnfs/scripts/build.sh [platform]
 #
 # Platforms: win-x64 | linux-x64 | linux-arm64 | osx-x64 | osx-arm64 | all
 # Default: all
