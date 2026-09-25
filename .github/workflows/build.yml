@@ -64,6 +64,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The runner service starts with PATH /usr/bin:/bin:/usr/sbin:/sbin.
+      - name: Put Homebrew on PATH
+        run: echo /opt/homebrew/bin >> "$GITHUB_PATH"
+
       - name: Install build deps
         run: brew install cmake ninja
 
