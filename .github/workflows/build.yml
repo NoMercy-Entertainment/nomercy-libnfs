@@ -73,6 +73,18 @@ jobs:
       - name: Install build deps
         run: brew install cmake ninja
 
+      # Regression test for the fetch step below (#2, #4). It needs bash,
+      # python3 and PyYAML; the Mac mini ships python3 without PyYAML, and
+      # Homebrew's python refuses a bare pip install (PEP 668), so try the
+      # plain install first and fall back to the Homebrew flag.
+      - name: Test the per-job work folder (scripts/test-macos-workdir.sh)
+        run: |
+          set -euo pipefail
+          python3 -c 'import yaml' 2>/dev/null \
+            || python3 -m pip install --quiet --user pyyaml \
+            || python3 -m pip install --quiet --user --break-system-packages pyyaml
+          bash scripts/test-macos-workdir.sh
+
       # Both matrix jobs run on the same self-hosted Mac mini, one after the
       # other, and a rerun lands on it too. A fixed shared folder let the
       # second job build inside the first job's tree and cache (#2, #4).
