@@ -61,6 +61,8 @@ jobs:
     env:
       LIBNFS_TAG: libnfs-6.0.2
       LIBNFS_SHA256: 4e5459cc3e0242447879004e9ad28286d4d27daa42cbdcde423248fad911e747
+      RID: ${{ matrix.rid }}
+      ARCH: ${{ matrix.arch }}
     steps:
       - uses: actions/checkout@v7.0.1
 
@@ -71,24 +73,44 @@ jobs:
       - name: Install build deps
         run: brew install cmake ninja
 
+      # Regression test for the fetch step below (#2, #4). It needs bash,
+      # python3 and PyYAML; the Mac mini ships python3 without PyYAML, and
+      # Homebrew's python refuses a bare pip install (PEP 668), so try the
+      # plain install first and fall back to the Homebrew flag.
+      - name: Test the per-job work folder (scripts/test-macos-workdir.sh)
+        run: |
+          set -euo pipefail
+          python3 -c 'import yaml' 2>/dev/null \
+            || python3 -m pip install --quiet --user pyyaml \
+            || python3 -m pip install --quiet --user --break-system-packages pyyaml
+          bash scripts/test-macos-workdir.sh
+
+      # Both matrix jobs run on the same self-hosted Mac mini, one after the
+      # other, and a rerun lands on it too. A fixed shared folder let the
+      # second job build inside the first job's tree and cache (#2, #4).
+      # Each job gets its own folder under RUNNER_TEMP and wipes it first.
+      # Covered by scripts/test-macos-workdir.sh.
       - name: Fetch + verify libnfs source
         run: |
           set -euo pipefail
-          mkdir -p /tmp/libnfs-build
-          cd /tmp/libnfs-build
+          WORK="${RUNNER_TEMP}/libnfs-${RID}"
+          rm -rf "${WORK}"
+          mkdir -p "${WORK}"
+          echo "WORK=${WORK}" >> "$GITHUB_ENV"
+          cd "${WORK}"
           curl -sSL -o libnfs.tar.gz \
             "https://github.com/sahlberg/libnfs/archive/refs/tags/${LIBNFS_TAG}.tar.gz"
           echo "${LIBNFS_SHA256}  libnfs.tar.gz" | shasum -a 256 -c -
           tar -xzf libnfs.tar.gz
-          mv libnfs-${LIBNFS_TAG} libnfs
+          mv "libnfs-${LIBNFS_TAG}" libnfs
 
       - name: Build libnfs (${{ matrix.arch }})
         run: |
           set -euo pipefail
-          cd /tmp/libnfs-build/libnfs
+          cd "${WORK}/libnfs"
           cmake -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX=/tmp/libnfs-build/install \
+            -DCMAKE_INSTALL_PREFIX="${WORK}/install" \
             -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch }} \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
             -DBUILD_SHARED_LIBS=ON \
@@ -103,7 +125,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p output/${{ matrix.rid }}
-          DYLIB=$(find /tmp/libnfs-build/install/lib -name "libnfs*.dylib" -not -type l | head -1)
+          DYLIB=$(find "${WORK}/install/lib" -name "libnfs*.dylib" -not -type l | head -1)
           test -n "${DYLIB}" || { echo "no dylib produced" >&2; exit 1; }
           cp "${DYLIB}" output/${{ matrix.rid }}/libnfs.dylib
 
@@ -115,6 +137,13 @@ jobs:
 
           ls -la output/${{ matrix.rid }}/
           file output/${{ matrix.rid }}/libnfs.dylib
+
+          # The dylib must hold exactly the matrix arch: a stale build tree
+          # once produced the other arch under this rid (#4).
+          ARCHS=$(lipo -archs output/${{ matrix.rid }}/libnfs.dylib)
+          [ "${ARCHS}" = "${ARCH}" ] \
+            || { echo "WRONG ARCH: want ${ARCH}, dylib has '${ARCHS}'" >&2; exit 1; }
+          echo "arch ok: ${ARCHS}"
 
       - name: Verify symbols
         run: |
