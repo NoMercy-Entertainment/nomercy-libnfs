@@ -17,6 +17,7 @@ jobs:
   # Docker-based builds (Linux + Windows cross-compile)
   # ---------------------------------------------------------------------------
   docker-build:
+    timeout-minutes: 7200
     name: ${{ matrix.rid }}
     runs-on: [self-hosted, Linux, X64, beast-unit]
     strategy:
@@ -48,6 +49,7 @@ jobs:
   # libnfs is POSIX-native — clean cmake build, no osxcross or patches needed.
   # ---------------------------------------------------------------------------
   macos-build:
+    timeout-minutes: 7200
     name: ${{ matrix.rid }}
     runs-on: [self-hosted, macOS, ARM64, mac-mini]
     strategy:
@@ -170,6 +172,7 @@ jobs:
   # commit + push back to the branch so consumers can pull binaries directly.
   # ---------------------------------------------------------------------------
   commit-binaries:
+    timeout-minutes: 7200
     name: Commit binaries
     needs: [docker-build, macos-build]
     runs-on: [self-hosted, Linux, X64, beast-unit]
