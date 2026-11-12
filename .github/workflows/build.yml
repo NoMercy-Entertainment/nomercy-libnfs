@@ -13,6 +13,14 @@ permissions:
   contents: read
 
 jobs:
+  # One libnfs tag and source hash in the dockerfile, this workflow and verify.sh (libnfs#5).
+  source-hash:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: The source hash agrees everywhere
+        run: bash scripts/check-source-hash.sh
+
   # ---------------------------------------------------------------------------
   # Docker-based builds (Linux + Windows cross-compile)
   # ---------------------------------------------------------------------------

@@ -13,13 +13,18 @@ OUTPUT_DIR="${PKG_DIR}/output"
 PLATFORM="${1:-all}"
 
 # ── Source tarball SHA256 ─────────────────────────────────────
-# libnfs-6.0.2 tag archive from GitHub:
-# https://github.com/sahlberg/libnfs/archive/refs/tags/libnfs-6.0.2.tar.gz
-#
-# Verify / regenerate before first build:
-#   wget -qO- https://github.com/sahlberg/libnfs/archive/refs/tags/libnfs-6.0.2.tar.gz | sha256sum
-# Update this value and LIBNFS_SHA256 in libnfs-base.dockerfile if it differs.
-KNOWN_SOURCE_SHA256="8e03a30c5b11a4aebcc69af5b85d9ecc28fa0a4cdd38b76ec50cde38b6d53d45"
+# libnfs-base.dockerfile is the one source of the tag and its archive hash (libnfs#5); the
+# build enforces it there. To bump: change both values in the dockerfile and in build.yml, from
+#   curl -sSL https://github.com/sahlberg/libnfs/archive/refs/tags/<tag>.tar.gz | sha256sum
+# scripts/check-source-hash.sh fails when the files disagree.
+dockerfile_env() { grep -m1 -oE "^ENV $1=[A-Za-z0-9._-]+" "${PKG_DIR}/libnfs-base.dockerfile" | cut -d= -f2; }
+LIBNFS_TAG="$(dockerfile_env LIBNFS_TAG)"
+KNOWN_SOURCE_SHA256="$(dockerfile_env LIBNFS_SHA256)"
+
+if [ "${PLATFORM}" = "--print-source-sha" ]; then
+    echo "${LIBNFS_TAG} ${KNOWN_SOURCE_SHA256}"
+    exit 0
+fi
 
 # ── Required exports in each binary ──────────────────────────
 REQUIRED_SYMBOLS=(
@@ -48,7 +53,7 @@ verify_symbols_linux() {
     local file="$1"
     echo "Checking symbols in ${file}"
     for sym in "${REQUIRED_SYMBOLS[@]}"; do
-        if nm -D "${file}" 2>/dev/null | grep -q " ${sym}$"; then
+        if nm -D "${file}" 2>/dev/null | grep " ${sym}$" > /dev/null; then
             echo "  OK: ${sym}"
         else
             echo "  MISSING: ${sym}" >&2
@@ -73,7 +78,7 @@ verify_symbols_windows() {
         return
     fi
     for sym in "${REQUIRED_SYMBOLS[@]}"; do
-        if "${tool}" -p "${file}" 2>/dev/null | grep -q "${sym}"; then
+        if "${tool}" -p "${file}" 2>/dev/null | grep "${sym}" > /dev/null; then
             echo "  OK: ${sym}"
         else
             echo "  MISSING: ${sym}" >&2
@@ -112,7 +117,7 @@ verify_platform() {
             echo "Size: $(du -sh "${f}" | cut -f1)"
             if command -v nm >/dev/null 2>&1; then
                 for sym in "${REQUIRED_SYMBOLS[@]}"; do
-                    if nm -gU "${f}" 2>/dev/null | grep -q "${sym}"; then
+                    if nm -gU "${f}" 2>/dev/null | grep "${sym}" > /dev/null; then
                         echo "  OK: ${sym}"
                     else
                         echo "  MISSING: ${sym}" >&2
@@ -138,7 +143,7 @@ else
 fi
 
 echo ""
-echo "Source SHA256 for libnfs-6.0.2: ${KNOWN_SOURCE_SHA256}"
+echo "Source SHA256 for ${LIBNFS_TAG}: ${KNOWN_SOURCE_SHA256}"
 echo ""
 echo "Results: ${PASS} platforms inspected, ${FAIL} symbol failures"
 [ "${FAIL}" -eq 0 ] || exit 1
